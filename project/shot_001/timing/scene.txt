@@ -1,0 +1,5 @@
+file '../keyframes/0001.png'
+duration 1.50
+file '../keyframes/0002.png'
+duration 1.50
+file '../keyframes/0002.png'

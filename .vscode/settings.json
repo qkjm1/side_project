@@ -1,0 +1,14 @@
+{
+  "python.terminal.activateEnvironment": true,
+  "python.defaultInterpreterPath": "",
+  "python.analysis.typeCheckingMode": "basic",
+  "terminal.integrated.defaultProfile.windows": "PowerShell",
+  "[python]": {
+    "editor.formatOnSave": true
+  },
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.venv": true,
+    "**/.mypy_cache": true
+  }
+}

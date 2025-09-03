@@ -1,0 +1,208 @@
+{
+  "version": "2.0.0",
+  "inputs": [
+    {
+      "id": "shotId",
+      "type": "promptString",
+      "description": "샷 폴더 이름 (예: shot_001)",
+      "default": "shot_001"
+    },
+    {
+      "id": "baseFps",
+      "type": "promptString",
+      "description": "베이스 프레임레이트 (4~12 권장)",
+      "default": "8"
+    },
+    {
+      "id": "exp",
+      "type": "pickString",
+      "description": "RIFE exp (배수) - auto면 자동 계산",
+      "options": [
+        "auto",
+        "1",
+        "2",
+        "3"
+      ],
+      "default": "auto"
+    },
+    {
+      "id": "width",
+      "type": "promptString",
+      "description": "출력 가로 해상도",
+      "default": "1920"
+    },
+    {
+      "id": "height",
+      "type": "promptString",
+      "description": "출력 세로 해상도",
+      "default": "1080"
+    },
+    {
+      "id": "targetFps",
+      "type": "promptString",
+      "description": "최종 FPS",
+      "default": "24"
+    },
+    {
+      "id": "tta",
+      "type": "pickString",
+      "description": "RIFE TTA 활성화?",
+      "options": [
+        "0",
+        "1"
+      ],
+      "default": "0"
+    },
+    {
+      "id": "uhd",
+      "type": "pickString",
+      "description": "UHD 모드?",
+      "options": [
+        "0",
+        "1"
+      ],
+      "default": "0"
+    },
+    {
+      "id": "scale",
+      "type": "promptString",
+      "description": "스케일(메모리 절약용, 1.0 그대로)",
+      "default": "1.0"
+    }
+  ],
+  "tasks": [
+    {
+      "label": "Create venv",
+      "type": "shell",
+      "command": "/usr/bin/env python3 -m venv .venv",
+      "windows": {
+        "command": "python -m venv .venv"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Create venv (brew python@3.10)",
+      "type": "shell",
+      "command": "/bin/zsh -lc \"$(brew --prefix python@3.10)/bin/python3.10 -m venv .venv\"",
+      "problemMatcher": []
+    },
+    {
+      "label": "Install Torch (CUDA 12.1)",
+      "type": "shell",
+      "windows": {
+        "command": ".venv\\Scripts\\pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
+      },
+      "linux": {
+        "command": ".venv/bin/pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
+      },
+      "osx": {
+        "command": ".venv/bin/pip install torch torchvision torchaudio"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Install requirements",
+      "type": "shell",
+      "windows": {
+        "command": ".venv\\Scripts\\pip install -r requirements.txt"
+      },
+      "linux": {
+        "command": ".venv/bin/pip install -r requirements.txt"
+      },
+      "osx": {
+        "command": ".venv/bin/pip install -r requirements.txt"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Clone Practical-RIFE",
+      "type": "shell",
+      "command": "git clone https://github.com/hzwer/Practical-RIFE.git",
+      "problemMatcher": []
+    },
+    {
+      "label": "Step: Build Base Video",
+      "type": "shell",
+      "windows": {
+        "command": ".venv\\Scripts\\python.exe scripts/build_base.py --shot ${input:shotId} --base-fps ${input:baseFps} --width ${input:width} --height ${input:height}"
+      },
+      "linux": {
+        "command": ".venv/bin/python scripts/build_base.py --shot ${input:shotId} --base-fps ${input:baseFps} --width ${input:width} --height ${input:height}"
+      },
+      "osx": {
+        "command": ".venv/bin/python scripts/build_base.py --shot ${input:shotId} --base-fps ${input:baseFps} --width ${input:width} --height ${input:height}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Step: Build Base Video (native-size)",
+      "type": "shell",
+      "windows": {
+        "command": ".venv\\Scripts\\python.exe scripts/build_base.py --shot ${input:shotId} --base-fps ${input:baseFps} --native-size"
+      },
+      "linux": {
+        "command": ".venv/bin/python scripts/build_base.py --shot ${input:shotId} --base-fps ${input:baseFps} --native-size"
+      },
+      "osx": {
+        "command": ".venv/bin/python scripts/build_base.py --shot ${input:shotId} --base-fps ${input:baseFps} --native-size"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Step: RIFE Interpolate",
+      "type": "shell",
+      "windows": {
+        "command": ".venv\\Scripts\\python.exe scripts/rife_interpolate.py --shot ${input:shotId} --exp ${input:exp} --base-fps ${input:baseFps} --target-fps ${input:targetFps} --tta ${input:tta} --uhd ${input:uhd} --scale ${input:scale}"
+      },
+      "linux": {
+        "command": ".venv/bin/python scripts/rife_interpolate.py --shot ${input:shotId} --exp ${input:exp} --base-fps ${input:baseFps} --target-fps ${input:targetFps} --tta ${input:tta} --uhd ${input:uhd} --scale ${input:scale}"
+      },
+      "osx": {
+        "command": ".venv/bin/python scripts/rife_interpolate.py --shot ${input:shotId} --exp ${input:exp} --base-fps ${input:baseFps} --target-fps ${input:targetFps} --tta ${input:tta} --uhd ${input:uhd} --scale ${input:scale}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Step: Finalize 24fps",
+      "type": "shell",
+      "windows": {
+        "command": ".venv\\Scripts\\python.exe scripts/finalize.py --shot ${input:shotId} --target-fps ${input:targetFps}"
+      },
+      "linux": {
+        "command": ".venv/bin/python scripts/finalize.py --shot ${input:shotId} --target-fps ${input:targetFps}"
+      },
+      "osx": {
+        "command": ".venv/bin/python scripts/finalize.py --shot ${input:shotId} --target-fps ${input:targetFps}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Full Pipeline",
+      "type": "shell",
+      "windows": {
+        "command": ".venv\\Scripts\\python.exe scripts/pipeline.py --shot ${input:shotId} --base-fps ${input:baseFps} --target-fps ${input:targetFps} --exp ${input:exp} --width ${input:width} --height ${input:height} --tta ${input:tta} --uhd ${input:uhd} --scale ${input:scale}"
+      },
+      "linux": {
+        "command": ".venv/bin/python scripts/pipeline.py --shot ${input:shotId} --base-fps ${input:baseFps} --target-fps ${input:targetFps} --exp ${input:exp} --width ${input:width} --height ${input:height} --tta ${input:tta} --uhd ${input:uhd} --scale ${input:scale}"
+      },
+      "osx": {
+        "command": ".venv/bin/python scripts/pipeline.py --shot ${input:shotId} --base-fps ${input:baseFps} --target-fps ${input:targetFps} --exp ${input:exp} --width ${input:width} --height ${input:height} --tta ${input:tta} --uhd ${input:uhd} --scale ${input:scale}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Full Pipeline (native-size)",
+      "type": "shell",
+      "windows": {
+        "command": ".venv\\Scripts\\python.exe scripts/pipeline.py --shot ${input:shotId} --base-fps ${input:baseFps} --target-fps ${input:targetFps} --exp ${input:exp} --native-size --tta ${input:tta} --uhd ${input:uhd} --scale ${input:scale}"
+      },
+      "linux": {
+        "command": ".venv/bin/python scripts/pipeline.py --shot ${input:shotId} --base-fps ${input:baseFps} --target-fps ${input:targetFps} --exp ${input:exp} --native-size --tta ${input:tta} --uhd ${input:uhd} --scale ${input:scale}"
+      },
+      "osx": {
+        "command": ".venv/bin/python scripts/pipeline.py --shot ${input:shotId} --base-fps ${input:baseFps} --target-fps ${input:targetFps} --exp ${input:exp} --native-size --tta ${input:tta} --uhd ${input:uhd} --scale ${input:scale}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
