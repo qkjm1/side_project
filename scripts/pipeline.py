@@ -126,7 +126,7 @@ def rife_interpolate_fb_avg(base_video: Path, exp: int, rife_dir: Path,
     run([
         "ffmpeg","-y",
         "-i", str(fwd_mp4), "-i", str(rev_out),
-        "-filter_complex","[0:v][1:v]blend=all_mode=average,format=yuv420p",
+        "-filter_complex","[0:v][1:v]blend=all_mode=darken,format=yuv420p",
         "-r", str(out_fps), "-an", str(avg_mp4)
     ], check=True)
     return avg_mp4, out_fps
