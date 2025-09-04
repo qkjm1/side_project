@@ -28,50 +28,34 @@ def ensure_dirs(shot_dir: Path):
 # ----------------------------
 # 1) 베이스 생성
 # ----------------------------
-def build_base(
-    shot_dir: Path,
-    base_fps: int,
-    width: int,
-    height: int,
-    mute: bool = True
-) -> Path:
-    """
-    timing/scene.txt가 있으면 concat demuxer로, 없으면 keyframes/000*.png를 1/N fps로 묶어서
-    work/base_{base_fps}fps.mp4를 만든다.
-    """
+def build_base(shot_dir: Path, base_fps: int, width: int, height: int,
+               mute: bool = True, fit: str = "auto") -> Path:
     scene_txt = shot_dir / "timing" / "scene.txt"
-    key_glob  = shot_dir / "keyframes" / "000*.png"
     out_path  = shot_dir / "work" / f"base_{base_fps}fps.mp4"
 
-    # 원본 종횡비 보존, 지정 해상도 중앙 패딩, SAR=1, 8bit 4:2:0
-    vf = (
-        f"scale={width}:-2:force_original_aspect_ratio=decrease,"
-        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-        "setsar=1,format=yuv420p"
-    )
-
-    if scene_txt.exists():
-        # scene.txt: concat demuxer 포맷이어야 함.
-        cmd = [
-            "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0",
-            "-i", str(scene_txt),
-            "-vf", vf,
-            "-r", str(base_fps),
-        ]
+    if fit == "canvas":
+        # 지정 캔버스(예: 1920x1080)에 맞춰 레터박스
+        vf = (
+            f"scale={width}:-2:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+            "setsar=1,format=yuv420p"
+        )
     else:
-        # 키프레임 폴백
-        cmd = [
-            "ffmpeg", "-y",
-            "-framerate", str(base_fps),
-            "-pattern_type", "glob", "-i", str(key_glob),
-            "-vf", vf,
-        ]
+        # ✅ 자동: 입력 해상도 그대로, 단 짝수 픽셀로만 정규화
+        vf = "scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1,format=yuv420p"
 
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "concat", "-safe", "0",
+        "-i", str(scene_txt),
+        "-vf", vf,
+        "-r", str(base_fps),
+        "-pix_fmt", "yuv420p",
+    ]
     if mute:
-        cmd += ["-an"]  # 무음 강제
+        cmd += ["-an"]
+    cmd += [str(out_path)]
 
-    cmd += ["-pix_fmt", "yuv420p", str(out_path)]
     run(cmd, check=True)
     return out_path
 
@@ -106,7 +90,6 @@ def rife_interpolate(
     try:
         input_fps = int(base_video.stem.split("_")[1].replace("fps", ""))
     except Exception:
-        # 실패 시 기본 1fps 가정
         input_fps = 1
 
     out_fps  = input_fps * (2 ** exp)
@@ -136,8 +119,7 @@ def rife_interpolate(
     if scale != 1.0:
         cmd += ["--scale", str(scale)]
 
-    # RIFE는 오디오 병합 단계에서 실패해도 비디오(_noaudio)를 만들어 두고 0/비0 종료를 할 수 있다.
-    # 실패를 무시(check=False)하고, 산출물 존재 여부로 판단한다.
+    # 오디오 병합 실패는 무시
     run(cmd, check=False)
 
     # 산출물 정리: _noaudio가 있으면 표준 이름으로 교체
@@ -145,7 +127,6 @@ def rife_interpolate(
         try:
             noa_path.replace(out_path)
         except Exception:
-            # 같은 파일시스템이 아닐 때 대비
             shutil.move(str(noa_path), str(out_path))
 
     if not out_path.exists():
@@ -215,7 +196,7 @@ def watch_and_build(root: Path, shot: str, **kwargs):
                 return
             # 디바운스 0.6s
             now = time.time()
-            if now - self._last < 0.6:  # 너무 잦은 이벤트 묶어 처리
+            if now - self._last < 0.6:
                 return
             self._last = now
             print(f"🔁 변경 감지: {event.src_path}")
@@ -254,12 +235,13 @@ def build_pipeline(
     uhd: bool = False,
     scale: float = 1.0,
     speed: float = 1.0,
+    fit: str = "auto",            # ← 추가
 ):
     shot_dir = root / "project" / shot
     ensure_dirs(shot_dir)
 
     print("== 1) 베이스 비디오 생성 ==")
-    base_video = build_base(shot_dir, base_fps, width, height, mute=True)
+    base_video = build_base(shot_dir, base_fps, width, height, mute=True, fit=fit)  # ← 수정
     print(f"   -> {base_video}")
 
     exp_val = compute_exp(base_fps, target_fps) if exp is None else int(exp)
@@ -290,6 +272,8 @@ def main():
     parser.add_argument("--uhd", type=int, default=0)
     parser.add_argument("--scale", type=float, default=1.0)
     parser.add_argument("--speed", type=float, default=1.5, help="setpts 배수(예: 1.5)")
+    parser.add_argument("--fit", choices=["auto","canvas"], default="auto",
+                        help="auto=원본 해상도 유지(짝수화), canvas=--width/--height에 레터박스")
     parser.add_argument("--watch", action="store_true", help="키프레임/scene.txt 변경 자동 감시")
 
     args = parser.parse_args()
@@ -314,6 +298,7 @@ def main():
             uhd=bool(args.uhd),
             scale=args.scale,
             speed=args.speed,
+            fit=args.fit,                      # ← 전달
         )
     else:
         build_pipeline(
@@ -327,6 +312,7 @@ def main():
             uhd=bool(args.uhd),
             scale=args.scale,
             speed=args.speed,
+            fit=args.fit,                      # ← 전달
         )
 
 if __name__ == "__main__":
