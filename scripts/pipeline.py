@@ -72,14 +72,16 @@ def compute_exp(base_fps: int, target_fps: int) -> int:
 # ----------------------------
 
 def reverse_video(src: Path, dst: Path):
+    # 입력/출력 모두 무음 처리
     run(["ffmpeg","-y","-i",str(src),"-vf","reverse","-an",str(dst)], check=True)
 
-def rife_interpolate_one(input_video: Path, exp: int, rife_dir: Path, tta=False, uhd=False, scale=1.0, tag=""):
+def rife_interpolate_one(input_video: Path, exp: int, rife_dir: Path,
+                         uhd: bool=False, scale: float=1.0, tag: str=""):
     work = input_video.parent
+    # base_XXfps.mp4 → XX 추출
     try:
         input_fps = int(Path(input_video).stem.split("_")[1].replace("fps",""))
     except Exception:
-        # fps 추정 실패 시 ffprobe로 가져와도 되지만 간단화:
         input_fps = 1
     out_fps  = input_fps * (2 ** exp)
     out_path = work / f"rife{tag}_{out_fps}fps.mp4"
@@ -87,11 +89,17 @@ def rife_interpolate_one(input_video: Path, exp: int, rife_dir: Path, tta=False,
 
     inf_py = Path(rife_dir) / "inference_video.py"
     model_dir = Path(rife_dir) / "train_log"
-    cmd = [sys.executable, str(inf_py), "--video", str(input_video), "--exp", str(exp), "--model", str(model_dir), "--output", str(out_path)]
-    if tta: cmd += ["--tta","1"]
+    cmd = [sys.executable, str(inf_py),
+           "--video", str(input_video),
+           "--exp", str(exp),
+           "--model", str(model_dir),
+           "--output", str(out_path)]
+    # Practical-RIFE가 --tta 미지원이므로 넣지 않음
     if uhd: cmd += ["--UHD"]
     if scale != 1.0: cmd += ["--scale", str(scale)]
+
     run(cmd, check=False)
+
     if noa_path.exists():
         try: noa_path.replace(out_path)
         except Exception: shutil.move(str(noa_path), str(out_path))
@@ -99,17 +107,21 @@ def rife_interpolate_one(input_video: Path, exp: int, rife_dir: Path, tta=False,
         print("ERROR: RIFE 산출물 없음", file=sys.stderr); sys.exit(1)
     return out_path, out_fps
 
-def rife_interpolate_fb_avg(base_video: Path, exp: int, rife_dir: Path, tta=False, uhd=False, scale=1.0):
+def rife_interpolate_fb_avg(base_video: Path, exp: int, rife_dir: Path,
+                            uhd: bool=False, scale: float=1.0):
     work = base_video.parent
-    # 1) 정방향
-    fwd_mp4, out_fps = rife_interpolate_one(base_video, exp, rife_dir, tta=tta, uhd=uhd, scale=scale, tag="_fwd")
+    # 1) 정방향 보간
+    fwd_mp4, out_fps = rife_interpolate_one(base_video, exp, rife_dir,
+                                            uhd=uhd, scale=scale, tag="_fwd")
     # 2) 입력 뒤집기 → 역방향 보간 → 다시 되돌리기
     rev_in  = work / "base_rev.mp4"
     rev_out = work / f"rife_rev_{out_fps}fps.mp4"
     reverse_video(base_video, rev_in)
-    rev_interp, _ = rife_interpolate_one(rev_in, exp, rife_dir, tta=tta, uhd=uhd, scale=scale, tag="_bwd")
-    reverse_video(rev_interp, rev_out)
-    # 3) 평균(가중 평균도 가능; 우선 단순 평균)
+    bwd_interp, _ = rife_interpolate_one(rev_in, exp, rife_dir,
+                                         uhd=uhd, scale=scale, tag="_bwd")
+    reverse_video(bwd_interp, rev_out)
+
+    # 3) 정/역 결과 평균 → 최종 rife_*fps.mp4로 저장
     avg_mp4 = work / f"rife_fbavg_{out_fps}fps.mp4"
     run([
         "ffmpeg","-y",
@@ -120,75 +132,30 @@ def rife_interpolate_fb_avg(base_video: Path, exp: int, rife_dir: Path, tta=Fals
     return avg_mp4, out_fps
 
 
+
 def rife_interpolate(
     shot_dir: Path,
     exp: int,
     rife_dir: Path,
-    tta: bool=False,
-    uhd: bool=False,
-    scale: float=1.0,
-    fb_avg: bool=False
+    tta: bool = False,   # 받아만 두고 내부에서는 사용 안 함(Practical-RIFE 미지원)
+    uhd: bool = False,
+    scale: float = 1.0,
+    fb_avg: bool = False
 ):
     work = shot_dir / "work"
     base_candidates = sorted(work.glob("base_*fps.mp4"), key=os.path.getmtime)
     base_video = base_candidates[-1] if base_candidates else None
     if base_video is None:
-        print("ERROR: work/에 base_*fps.mp4 없음", file=sys.stderr); sys.exit(1)
+        print("ERROR: work/에 base_*fps.mp4 가 없습니다. 먼저 베이스를 생성하세요.", file=sys.stderr)
+        sys.exit(1)
 
     if fb_avg:
-        return rife_interpolate_fb_avg(base_video, exp, rife_dir, tta=tta, uhd=uhd, scale=scale)
+        # 정/역방향 보간 후 평균
+        return rife_interpolate_fb_avg(base_video, exp, rife_dir, uhd=uhd, scale=scale)
     else:
-        # 기존 단일 방향
-        return rife_interpolate_one(base_video, exp, rife_dir, tta=tta, uhd=uhd, scale=scale, tag="")
+        # 단일 방향 보간
+        return rife_interpolate_one(base_video, exp, rife_dir, uhd=uhd, scale=scale, tag="")
 
-    # base_XXfps 로부터 XX 추출
-    try:
-        input_fps = int(base_video.stem.split("_")[1].replace("fps", ""))
-    except Exception:
-        input_fps = 1
-
-    out_fps  = input_fps * (2 ** exp)
-    out_path = work / f"rife_{out_fps}fps.mp4"
-    noa_path = work / f"rife_{out_fps}fps_noaudio.mp4"  # Practical-RIFE가 실패 시 남기는 파일명
-
-    inf_py = rife_dir / "inference_video.py"
-    model_dir = rife_dir / "train_log"
-    if not inf_py.exists():
-        print(f"ERROR: {inf_py} 를 찾을 수 없습니다. Practical-RIFE가 올바르게 존재하는지 확인하세요.", file=sys.stderr)
-        sys.exit(1)
-    if not model_dir.exists():
-        print(f"ERROR: {model_dir} 를 찾을 수 없습니다. RIFE 모델(train_log)이 필요합니다.", file=sys.stderr)
-        sys.exit(1)
-
-    cmd = [
-        sys.executable, str(inf_py),
-        "--video",  str(base_video),
-        "--exp",    str(exp),
-        "--model",  str(model_dir),
-        "--output", str(out_path),
-    ]
-#    if tta:
- #       cmd += ["--tta", "1"]
-    if uhd:
-        cmd += ["--UHD"]
-    if scale != 1.0:
-        cmd += ["--scale", str(scale)]
-
-    # 오디오 병합 실패는 무시
-    run(cmd, check=False)
-
-    # 산출물 정리: _noaudio가 있으면 표준 이름으로 교체
-    if noa_path.exists():
-        try:
-            noa_path.replace(out_path)
-        except Exception:
-            shutil.move(str(noa_path), str(out_path))
-
-    if not out_path.exists():
-        print("ERROR: RIFE 보간 산출물이 보이지 않습니다. 위 로그를 확인하세요.", file=sys.stderr)
-        sys.exit(1)
-
-    return out_path, out_fps
 
 # ----------------------------
 # 4) 최종 렌더
@@ -290,7 +257,8 @@ def build_pipeline(
     uhd: bool = False,
     scale: float = 1.0,
     speed: float = 1.0,
-    fit: str = "auto",            # ← 추가
+    fit: str = "auto",
+    fb_avg: bool = False
 ):
     shot_dir = root / "project" / shot
     ensure_dirs(shot_dir)
@@ -302,7 +270,7 @@ def build_pipeline(
     exp_val = compute_exp(base_fps, target_fps) if exp is None else int(exp)
     print(f"== 2) RIFE 보간 (exp={exp_val}) ==")
     rife_video, out_fps = rife_interpolate(
-        shot_dir, exp_val, rife_dir, tta=tta, uhd=uhd, scale=scale
+        shot_dir, exp_val, rife_dir, tta=tta, uhd=uhd, scale=scale, fb_avg=fb_avg
     )
     print(f"   -> {rife_video} ({out_fps}fps)")
 
@@ -330,6 +298,8 @@ def main():
     parser.add_argument("--fit", choices=["auto","canvas"], default="auto",
                         help="auto=원본 해상도 유지(짝수화), canvas=--width/--height에 레터박스")
     parser.add_argument("--watch", action="store_true", help="키프레임/scene.txt 변경 자동 감시")
+    parser.add_argument("--fb-avg", type=int, default=0, help="정/역방향 보간 후 평균(1=사용)")
+
 
     args = parser.parse_args()
     ws = Path.cwd()
@@ -353,7 +323,9 @@ def main():
             uhd=bool(args.uhd),
             scale=args.scale,
             speed=args.speed,
-            fit=args.fit,                      # ← 전달
+            fb_avg=bool(args.fb_avg),
+            fit=args.fit
+            
         )
     else:
         build_pipeline(
@@ -367,7 +339,8 @@ def main():
             uhd=bool(args.uhd),
             scale=args.scale,
             speed=args.speed,
-            fit=args.fit,                      # ← 전달
+            fit=args.fit,
+            fb_avg=bool(args.fb_avg)
         )
 
 if __name__ == "__main__":

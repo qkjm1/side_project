@@ -9,6 +9,14 @@ def main():
     p.add_argument("--base-fps", type=int, default=8)
     p.add_argument("--width", type=int, default=1920)
     p.add_argument("--height", type=int, default=1080)
+    # argparse 쪽에 추가
+    p.add_argument(
+    "--fit",
+    choices=["auto", "canvas"],
+    default="auto",
+    help="auto=원본 해상도 유지(짝수화), canvas=--width/--height에 맞춰 레터박스"
+   )
+
 
     # ✅ 추가: 무음 플래그(기본 True)
     g = p.add_mutually_exclusive_group()
