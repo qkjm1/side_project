@@ -70,21 +70,76 @@ def compute_exp(base_fps: int, target_fps: int) -> int:
 # ----------------------------
 # 3) RIFE 보간
 # ----------------------------
+
+def reverse_video(src: Path, dst: Path):
+    run(["ffmpeg","-y","-i",str(src),"-vf","reverse","-an",str(dst)], check=True)
+
+def rife_interpolate_one(input_video: Path, exp: int, rife_dir: Path, tta=False, uhd=False, scale=1.0, tag=""):
+    work = input_video.parent
+    try:
+        input_fps = int(Path(input_video).stem.split("_")[1].replace("fps",""))
+    except Exception:
+        # fps 추정 실패 시 ffprobe로 가져와도 되지만 간단화:
+        input_fps = 1
+    out_fps  = input_fps * (2 ** exp)
+    out_path = work / f"rife{tag}_{out_fps}fps.mp4"
+    noa_path = work / f"rife{tag}_{out_fps}fps_noaudio.mp4"
+
+    inf_py = Path(rife_dir) / "inference_video.py"
+    model_dir = Path(rife_dir) / "train_log"
+    cmd = [sys.executable, str(inf_py), "--video", str(input_video), "--exp", str(exp), "--model", str(model_dir), "--output", str(out_path)]
+    if tta: cmd += ["--tta","1"]
+    if uhd: cmd += ["--UHD"]
+    if scale != 1.0: cmd += ["--scale", str(scale)]
+    run(cmd, check=False)
+    if noa_path.exists():
+        try: noa_path.replace(out_path)
+        except Exception: shutil.move(str(noa_path), str(out_path))
+    if not out_path.exists():
+        print("ERROR: RIFE 산출물 없음", file=sys.stderr); sys.exit(1)
+    return out_path, out_fps
+
+def rife_interpolate_fb_avg(base_video: Path, exp: int, rife_dir: Path, tta=False, uhd=False, scale=1.0):
+    work = base_video.parent
+    # 1) 정방향
+    fwd_mp4, out_fps = rife_interpolate_one(base_video, exp, rife_dir, tta=tta, uhd=uhd, scale=scale, tag="_fwd")
+    # 2) 입력 뒤집기 → 역방향 보간 → 다시 되돌리기
+    rev_in  = work / "base_rev.mp4"
+    rev_out = work / f"rife_rev_{out_fps}fps.mp4"
+    reverse_video(base_video, rev_in)
+    rev_interp, _ = rife_interpolate_one(rev_in, exp, rife_dir, tta=tta, uhd=uhd, scale=scale, tag="_bwd")
+    reverse_video(rev_interp, rev_out)
+    # 3) 평균(가중 평균도 가능; 우선 단순 평균)
+    avg_mp4 = work / f"rife_fbavg_{out_fps}fps.mp4"
+    run([
+        "ffmpeg","-y",
+        "-i", str(fwd_mp4), "-i", str(rev_out),
+        "-filter_complex","[0:v][1:v]blend=all_mode=average,format=yuv420p",
+        "-r", str(out_fps), "-an", str(avg_mp4)
+    ], check=True)
+    return avg_mp4, out_fps
+
+
 def rife_interpolate(
     shot_dir: Path,
     exp: int,
     rife_dir: Path,
     tta: bool=False,
     uhd: bool=False,
-    scale: float=1.0
+    scale: float=1.0,
+    fb_avg: bool=False
 ):
     work = shot_dir / "work"
-    # 가장 최신 base_*fps.mp4 선택
     base_candidates = sorted(work.glob("base_*fps.mp4"), key=os.path.getmtime)
     base_video = base_candidates[-1] if base_candidates else None
     if base_video is None:
-        print("ERROR: work/에 base_*fps.mp4 가 없습니다. 먼저 베이스를 생성하세요.", file=sys.stderr)
-        sys.exit(1)
+        print("ERROR: work/에 base_*fps.mp4 없음", file=sys.stderr); sys.exit(1)
+
+    if fb_avg:
+        return rife_interpolate_fb_avg(base_video, exp, rife_dir, tta=tta, uhd=uhd, scale=scale)
+    else:
+        # 기존 단일 방향
+        return rife_interpolate_one(base_video, exp, rife_dir, tta=tta, uhd=uhd, scale=scale, tag="")
 
     # base_XXfps 로부터 XX 추출
     try:
@@ -112,8 +167,8 @@ def rife_interpolate(
         "--model",  str(model_dir),
         "--output", str(out_path),
     ]
-    if tta:
-        cmd += ["--tta", "1"]
+#    if tta:
+ #       cmd += ["--tta", "1"]
     if uhd:
         cmd += ["--UHD"]
     if scale != 1.0:
